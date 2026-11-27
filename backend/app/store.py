@@ -8,7 +8,7 @@ import copy
 import time
 from typing import Any
 
-from app.seed import SEED_ROWS
+from app.seed import SEED_BAGS, SEED_ISSUES, SEED_ROWS
 
 
 class Store:
@@ -16,6 +16,9 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 原料袋台账与拼配领用台账（非业务模块，不进概览看板）
+        self._bags: list[dict[str, Any]] = [dict(row) for row in SEED_BAGS]
+        self._issues: list[dict[str, Any]] = [dict(row) for row in SEED_ISSUES]
         # 批次号 -> 跨模块记录引用列表，每项 {"module": str, "entry_id": int}
         self._lineage: dict[str, list[dict[str, Any]]] = {}
         # 事件日志：每项 {"ts": float, "module": str, "entry_id": int, "action": str, "detail": dict}
@@ -40,6 +43,30 @@ class Store:
             if int(row.get("id", 0)) == entry_id:
                 return row
         return None
+
+    # ── 原料袋 / 拼配领用台账 ──
+
+    def bags(self) -> list[dict[str, Any]]:
+        return self._bags
+
+    def issues(self) -> list[dict[str, Any]]:
+        return self._issues
+
+    def find_bag(self, seal: str) -> dict[str, Any] | None:
+        for row in self._bags:
+            if row.get("袋号") == seal:
+                return row
+        return None
+
+    def find_issue(self, issue_id: int) -> dict[str, Any] | None:
+        for row in self._issues:
+            if int(row.get("id", 0)) == int(issue_id):
+                return row
+        return None
+
+    @staticmethod
+    def next_id(rows: list[dict[str, Any]]) -> int:
+        return max((int(row.get("id", 0)) for row in rows), default=0) + 1
 
     # ── 概览 ──
 

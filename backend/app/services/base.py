@@ -74,7 +74,7 @@ class BaseModuleService:
                         "shipment_id", "shipment_no", "upstream_module", "upstream_id",
                         "fermentation_warning", "moisture_warning", "linked_defects",
                         "audit_ref", "上游工序", "上游记录ID", "批次号", "登记编号",
-                        "序号"]
+                        "序号", "上游重量", "issue_id", "配方ID"]
         for ef in extra_fields:
             if ef in values:
                 entry[ef] = values[ef]

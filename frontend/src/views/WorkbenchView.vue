@@ -37,6 +37,113 @@
       <button class="btn ghost" data-testid="reset" type="button" @click="resetFilters">重置条件</button>
     </form>
 
+    <!-- 原料袋看板：拼配工作台与料房收货台共用，一袋一个有效位置 -->
+    <div v-if="showStock" class="bag-board">
+      <h4>原料袋看板（在库 / 在用 / 待收，一袋一个有效位置）</h4>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>袋号</th>
+            <th>批次号</th>
+            <th>总量(kg)</th>
+            <th>在库量(kg)</th>
+            <th>位置</th>
+            <th>占用配方</th>
+            <th>办理回查</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="bag in bags" :key="String(bag.袋号)" :data-position="String(bag.位置)">
+            <td>{{ bag.袋号 }}</td>
+            <td>{{ bag.批次号 || '—' }}</td>
+            <td>{{ bag.总量 }}</td>
+            <td>{{ bag.在库量 }}</td>
+            <td><span class="position-tag" :class="`pos-${bag.位置}`">{{ bag.位置 }}</span></td>
+            <td>{{ bag.占用配方 || '—' }}</td>
+            <td>
+              <button class="link" type="button" :data-testid="`bag-status-${bag.袋号}`"
+                @click="viewBagStatus(String(bag.袋号))">回查</button>
+            </td>
+          </tr>
+          <tr v-if="!bags.length">
+            <td colspan="7" class="empty-state">暂无原料袋，精制分级确认后原料自动入袋</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 袋办理状态：两个工作台各办成了什么、未办成原因、实际入库重量 -->
+    <div v-if="bagStatus" class="trace-panel bag-status-panel">
+      <h4>
+        袋 {{ bagStatus.袋号 }} 办理状态（位置：{{ bagStatus.位置 }}，
+        在库 {{ bagStatus.在库量 }}kg / 共 {{ bagStatus.总量 }}kg）
+      </h4>
+      <div class="side-grid">
+        <div class="side-card">
+          <strong>拼配工作台</strong>
+          <p>配方：{{ bagStatus.拼配侧.配方编号 || '—' }}（#{{ bagStatus.拼配侧.配方ID ?? '—' }}）</p>
+          <p>
+            领出 {{ bagStatus.拼配侧.领出重量 ?? '—' }}kg ｜
+            耗用 {{ bagStatus.拼配侧.已耗用重量 ?? '—' }}kg ｜
+            剩余可退 {{ bagStatus.拼配侧.剩余可退 ?? '—' }}kg
+          </p>
+          <p>状态：{{ bagStatus.拼配侧.状态 }}</p>
+        </div>
+        <div class="side-card">
+          <strong>料房收货台</strong>
+          <p>退料签：{{ bagStatus.料房侧.登记编号 || '—' }}（#{{ bagStatus.料房侧.退料签ID ?? '—' }}）</p>
+          <p>
+            申请退回 {{ bagStatus.料房侧.申请退回重量 ?? '—' }}kg ｜
+            实际入库 {{ bagStatus.料房侧.实收重量 == null ? '未实收' : `${bagStatus.料房侧.实收重量}kg` }}
+          </p>
+          <p>状态：{{ bagStatus.料房侧.状态 }}</p>
+        </div>
+      </div>
+      <p v-if="bagStatus.未办成原因" class="error-text">未办成：{{ bagStatus.未办成原因 }}</p>
+      <ol class="event-list">
+        <li v-for="(event, idx) in bagStatus.办理记录" :key="idx">
+          {{ event.module === 'material_return' ? '料房' : '拼配' }} · {{ event.action }} ·
+          {{ formatEventDetail(event.detail) }}
+        </li>
+      </ol>
+      <button class="btn ghost" type="button" @click="bagStatus = null">收起</button>
+    </div>
+
+    <!-- 配方用量回查：实际使用来源和用量 -->
+    <div v-if="usageRows" class="trace-panel">
+      <h4>配方#{{ usageFor }} 实际使用来源和用量</h4>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>袋号</th>
+            <th>来源</th>
+            <th>领出(kg)</th>
+            <th>耗用(kg)</th>
+            <th>退回(kg)</th>
+            <th>剩余可退(kg)</th>
+            <th>状态</th>
+            <th>退料签</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in usageRows" :key="u.id">
+            <td>{{ u.袋号 }}</td>
+            <td>{{ u.来源 }}</td>
+            <td>{{ u.领出重量 }}</td>
+            <td>{{ u.已耗用重量 }}</td>
+            <td>{{ u.退回重量 }}</td>
+            <td>{{ u.剩余可退 }}</td>
+            <td>{{ u.状态 }}</td>
+            <td>{{ formatSlips(u.退料签) }}</td>
+          </tr>
+          <tr v-if="!usageRows.length">
+            <td colspan="8" class="empty-state">该配方尚未领料</td>
+          </tr>
+        </tbody>
+      </table>
+      <button class="btn ghost" type="button" @click="usageRows = null">收起</button>
+    </div>
+
     <!-- 批次追溯链面板 -->
     <div v-if="showTrace && traceBatchNo" class="trace-panel">
       <h4>批次 {{ traceBatchNo }} 追溯链</h4>
@@ -85,6 +192,25 @@
             >
               {{ action }}
             </button>
+            <template v-if="isBlending">
+              <button class="link" type="button" :data-testid="`issue-${row.id}`"
+                @click="issueBag(row)">领出</button>
+              <button class="link" type="button" :data-testid="`consume-${row.id}`"
+                @click="consumeBag(row)">耗用</button>
+              <button class="link" type="button" :data-testid="`return-${row.id}`"
+                @click="returnBag(row)">退料</button>
+              <button class="link" type="button" :data-testid="`usage-${row.id}`"
+                @click="viewUsage(row)">用量回查</button>
+            </template>
+            <button
+              v-if="isMaterialReturn && row['袋号']"
+              class="link"
+              type="button"
+              :data-testid="`status-${row.id}`"
+              @click="viewBagStatus(String(row['袋号']))"
+            >
+              回查
+            </button>
             <button
               v-if="row['批次号']"
               class="link trace-link"
@@ -113,9 +239,13 @@
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate">
         <h3>登记{{ meta.entity }}</h3>
-        <label v-for="field in meta.fields" :key="field" class="create-field">
+        <p v-if="isMaterialReturn" class="modal-hint">
+          退料签对应一个真实领用：填袋号与已耗用重量，申请退回重量按真实剩余自动计算。
+        </p>
+        <label v-for="field in createFields" :key="field" class="create-field">
           <span>{{ field }}</span>
-          <input v-model="createValues[field]" :data-testid="`create-${field}`" required />
+          <input v-model="createValues[field]" :data-testid="`create-${field}`"
+            :required="requiredCreateFields.has(field)" />
         </label>
         <div class="page-actions">
           <button class="btn" type="button" @click="showCreate = false">取消</button>
@@ -144,6 +274,16 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/backend-service'
+import {
+  fetchBagStatus,
+  fetchUsage,
+  issueMaterial,
+  listBags,
+  receiveReturn,
+  recordUsage,
+  type BagRow,
+  type BagStatus,
+} from '@/api/material-client'
 import { fetchTraceChain } from '@/api/pipeline-client'
 import type { EntryRow } from '@/data/types'
 
@@ -169,6 +309,25 @@ const PROCESS_NAMES: Record<string, string> = {
   trace_code: '溯源码段', shipment: '发运交接',
 }
 const isProcessModule = computed(() => PROCESS_ORDER.includes(meta.key))
+
+// 原料领退流转：拼配工作台与料房收货台（配方退料签）
+const isBlending = computed(() => meta.key === 'blending')
+const isMaterialReturn = computed(() => meta.key === 'material_return')
+const showStock = computed(() => isBlending.value || isMaterialReturn.value)
+const bags = ref<BagRow[]>([])
+const bagStatus = ref<BagStatus | null>(null)
+const usageRows = ref<any[] | null>(null)
+const usageFor = ref<number | null>(null)
+
+// 退料签登记只需袋号与已耗用重量，其余由系统按真实剩余计算
+const createFields = computed(() =>
+  isMaterialReturn.value
+    ? ['袋号', '已耗用重量', '登记编号', '负责人', '备注说明']
+    : meta.fields,
+)
+const requiredCreateFields = computed(
+  () => new Set(isMaterialReturn.value ? ['袋号', '已耗用重量'] : meta.fields),
+)
 // 批次追溯
 const showTrace = ref(false)
 const traceBatchNo = ref('')
@@ -210,7 +369,7 @@ async function exportRows() {
 }
 
 function openCreate() {
-  createValues.value = Object.fromEntries(meta.fields.map((field) => [field, '']))
+  createValues.value = Object.fromEntries(createFields.value.map((field) => [field, '']))
   errorMessage.value = ''
   showCreate.value = true
 }
@@ -233,12 +392,112 @@ async function submitCreate() {
 async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
   try {
-    const result = await applyAction(meta.key, Number(row.id), action)
-    if (!result.ok) throw new Error(result.message)
+    if (isMaterialReturn.value && action === '实收归仓') {
+      // 料房收货台实收：可录入实收重量，留空按申请退回重量
+      const text = window.prompt(
+        '收货台实收重量（kg），留空按申请退回重量',
+        String(row['申请退回重量'] ?? ''),
+      )
+      if (text === null) return
+      await receiveReturn(Number(row.id), text.trim() ? Number(text) : undefined)
+    } else {
+      const result = await applyAction(meta.key, Number(row.id), action)
+      if (!result.ok) throw new Error(result.message)
+    }
     await reload()
+    await reloadBags()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '操作失败'
   }
+}
+
+// ── 原料领退流转 ──
+
+async function reloadBags() {
+  if (!showStock.value) return
+  try {
+    bags.value = await listBags()
+  } catch {
+    // 看板读取失败不阻塞主列表
+  }
+}
+
+async function issueBag(row: EntryRow) {
+  errorMessage.value = ''
+  const seal = window.prompt(`为配方 ${row['登记编号'] || row.id} 领料，输入在库袋号（整袋领出）`)
+  if (!seal) return
+  try {
+    await issueMaterial(Number(row.id), seal.trim())
+    await reload()
+    await reloadBags()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '领出失败'
+  }
+}
+
+async function consumeBag(row: EntryRow) {
+  errorMessage.value = ''
+  const seal = window.prompt('登记耗用：输入袋号')
+  if (!seal) return
+  const weightText = window.prompt(`袋 ${seal.trim()} 本次耗用重量（kg）`)
+  if (!weightText) return
+  try {
+    await recordUsage(Number(row.id), seal.trim(), Number(weightText))
+    await reload()
+    await reloadBags()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '耗用登记失败'
+  }
+}
+
+async function returnBag(row: EntryRow) {
+  errorMessage.value = ''
+  const seal = window.prompt('提交退料：输入袋号')
+  if (!seal) return
+  const usedText = window.prompt(`袋 ${seal.trim()} 已耗用重量（kg），剩余将申请退回`)
+  if (usedText === null) return
+  try {
+    const result = await createEntry('material_return', {
+      袋号: seal.trim(),
+      已耗用重量: usedText.trim(),
+    })
+    if (!result.ok) throw new Error(result.message)
+    await reload()
+    await reloadBags()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '退料登记失败'
+  }
+}
+
+async function viewUsage(row: EntryRow) {
+  errorMessage.value = ''
+  try {
+    usageRows.value = await fetchUsage(Number(row.id))
+    usageFor.value = Number(row.id)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '用量回查失败'
+  }
+}
+
+async function viewBagStatus(seal: string) {
+  errorMessage.value = ''
+  try {
+    bagStatus.value = await fetchBagStatus(seal)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '袋状态回查失败'
+  }
+}
+
+function formatEventDetail(detail: Record<string, unknown>): string {
+  if (!detail) return ''
+  return Object.entries(detail)
+    .map(([key, value]) => `${key}:${value}`)
+    .join(' ')
+}
+
+function formatSlips(slips: any[]): string {
+  if (!slips || !slips.length) return '—'
+  return slips.map((s) => `#${s.id}${s.status}`).join('、')
 }
 
 async function reload() {
@@ -280,7 +539,10 @@ function viewUpstream(row: EntryRow) {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  void reload()
+  void reloadBags()
+})
 </script>
 
 <style scoped>
@@ -371,5 +633,59 @@ onMounted(reload)
 .trace-link:hover, .upstream-link:hover {
   background: #27ae60;
   color: white !important;
+}
+.bag-board {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  background: #f6fbf7;
+  border-radius: 6px;
+  border-left: 3px solid #27ae60;
+}
+.bag-board h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #2c3e50;
+}
+.position-tag {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.position-tag.pos-在库 { background: #d4edda; color: #155724; }
+.position-tag.pos-在用 { background: #fff3cd; color: #856404; }
+.position-tag.pos-待收 { background: #cce5ff; color: #004085; }
+.bag-status-panel .side-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.bag-status-panel .side-card {
+  flex: 1 1 260px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.bag-status-panel .side-card strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #2c3e50;
+}
+.bag-status-panel .side-card p {
+  margin: 2px 0;
+  color: #555;
+}
+.event-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: #555;
+}
+.modal-hint {
+  font-size: 12px;
+  color: #7f8c8d;
+  margin: 0 0 8px;
 }
 </style>

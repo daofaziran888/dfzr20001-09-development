@@ -85,9 +85,14 @@ def get_entry(module: str, entry_id: int) -> dict[str, Any]:
 @router.post("/{module}", response_model=ActionResult)
 def create_entry(module: str, payload: EntryPayload) -> ActionResult:
     service = require_service(module)
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    entry, problems = service.create_entry(payload.values)
+    if problems:
+        missing = [p for p in problems if p in service.REQUIRED_FIELDS]
+        if missing and len(missing) == len(problems):
+            message = f"缺少必填字段：{'、'.join(missing)}"
+        else:
+            message = "；".join(str(p) for p in problems)
+        return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=f"{service.ENTITY}已登记", entry=entry)
 
 

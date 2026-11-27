@@ -11,6 +11,7 @@ from app.services.fermentation import FermentationService
 from app.services.drying import DryingService
 from app.services.grading import GradingService
 from app.services.blending import BlendingService
+from app.services.material_return import MaterialReturnService
 from app.services.packing import PackingService
 from app.services.storage import StorageService
 from app.services.testing import TestingService
@@ -31,6 +32,7 @@ SERVICES: dict[str, BaseModuleService] = {
     "drying": DryingService(),
     "grading": GradingService(),
     "blending": BlendingService(),
+    "material_return": MaterialReturnService(),
     "packing": PackingService(),
     "storage": StorageService(),
     "testing": TestingService(),

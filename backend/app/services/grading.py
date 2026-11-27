@@ -1,7 +1,11 @@
-"""精制分级领域服务：按筛号规格分选、碎末比例控制、等级判定，校验上游干燥。"""
+"""精制分级领域服务：按筛号规格分选、碎末比例控制、等级判定，校验上游干燥。
+
+确认分级后，产出按袋入库（一袋一号），供拼配领出与退料流转使用。
+"""
 from __future__ import annotations
 from typing import Any
 from app.services.base import BaseModuleService
+from app.services.material_stock import material_stock
 from app.store import store
 
 class GradingService(BaseModuleService):
@@ -49,12 +53,21 @@ class GradingService(BaseModuleService):
             return "等外"
 
     def on_confirm(self, entry: dict[str, Any], action: str) -> tuple[bool, str | None]:
-        """分级确认后更新批次产出重量。"""
+        """分级确认后更新批次产出重量，并把产出按袋入库供拼配领出。"""
         if action == "确认分级":
             debris = store.parse_weight(entry.get("碎末比例", "0"))
             input_weight = store.parse_weight(entry.get("上游重量", "0"))
             if input_weight > 0:
                 entry["产出重量"] = round(input_weight * (1.0 - debris / 100.0), 3)
+            output = store.parse_weight(entry.get("产出重量", "0"))
+            if output > 0:
+                # 按袋号幂等，重复确认不会重复入袋
+                material_stock.register_bag(
+                    f"SEAL-G{int(entry['id']):04d}",
+                    str(entry.get("批次号", "")),
+                    output,
+                    grading_id=int(entry["id"]),
+                )
         return True, None
 
     def get_gradings_for_blending(self, batch_no: str) -> list[dict[str, Any]]:
